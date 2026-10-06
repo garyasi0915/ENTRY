@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f5f2">
+  <meta name="description" content="一張復古遊戲桌，三個世界。探索 M9DY、無名火與 Untitled Design Agency 的互動 3D 入口。">
+  <title>INSERT PLAY — Interactive 3D Desk</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css?v=three-1">
+  <script type="importmap">{"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}</script>
+</head>
+<body>
+  <main id="desk" aria-label="Super Famicom 互動 3D 桌面">
+    <canvas id="scene" aria-label="拖動卡帶到主機插槽開始；拖动空白位置可轉動視角" aria-describedby="controls-help"></canvas>
+    <div class="loading" id="loading" role="status"><span class="loading-dots"><i></i><i></i><i></i><i></i></span><span>正在開機<span class="loading-ellipsis">...</span></span></div>
+    <div class="corner-controls">
+      <button class="icon-button" id="sound-toggle" type="button" aria-label="開啟音效" aria-pressed="false" title="開啟音效"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h4l5-4v12l-5-4H4z"/><path class="sound-off" d="m17 9 5 6m0-6-5 6"/><path class="sound-on" d="M17 8q5 4 0 8m3-11q7 7 0 14"/></svg></button>
+      <button class="icon-button" id="reset-view" type="button" aria-label="重設視角" title="重設視角"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8a8 8 0 1 1-1 8M5 3v6h6"/></svg></button>
+    </div>
+    <div id="drop-hint" class="drop-hint" aria-hidden="true">拖到主機插槽</div>
+    <div class="scene-caption" id="scene-caption" aria-hidden="true"><span class="caption-dot"></span> 拖動卡帶，插入新世界。</div>
+    <div class="bottom-panel">
+      <p class="interaction-hint" id="controls-help"><span class="desktop-hint">移到卡帶預覽 · 拖到插槽插入 · 拖動空白位置轉動視角</span><span class="touch-hint">拖卡帶到插槽 · 拖動空白位置轉動視角</span></p>
+      <div class="selection-bar">
+        <div class="selected-world"><span class="number" id="selected-number">01</span><div><span class="status-label" id="selection-label">PREVIEW</span><strong id="selected-name">M9DY</strong></div></div>
+        <div class="world-actions"><button id="eject-button" class="text-button" type="button" hidden>取出 <span aria-hidden="true">↑</span></button><button id="explore-button" class="explore-button" type="button">探索此世界 <span aria-hidden="true">↗</span></button></div>
+      </div>
+    </div>
+    <nav class="keyboard-controls" aria-label="鍵盤卡帶控制">
+      <button type="button" data-key="m9dy">選擇 M9DY</button><button type="button" data-key="fire">選擇無名火</button><button type="button" data-key="untitled">選擇 Untitled Design Agency</button><button id="insert-button" type="button">將所選卡帶插入主機</button>
+      <p>左右鍵選擇卡帶，I 插入；Escape 取消拖曳。</p>
+    </nav>
+    <div class="fallback" id="fallback" hidden><p>這個瀏覽器暫時無法啟動 3D 場景。</p><p>請啟用硬件加速，或使用新版 Chrome、Edge 或 Safari 再試。</p><button type="button" id="retry-button">重新載入</button></div>
+  </main>
+  <div class="sr-only" id="announcement" role="status" aria-live="polite"></div>
+  <dialog id="world-dialog"><button class="dialog-close" type="button" aria-label="關閉">×</button><p class="dialog-eyebrow">NEXT LEVEL · COMING SOON</p><h2 id="dialog-title">M9DY</h2><p>新世界準備中。<br>正式網站即將登場，敬請期待。</p><button class="dialog-back" type="button">繼續探索 <span aria-hidden="true">↩</span></button></dialog>
+  <script type="module" src="app.js?v=three-1"></script>
+</body>
+</html>

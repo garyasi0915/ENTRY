@@ -417,8 +417,8 @@ function layout() {
     if(points.every(p=>Math.abs(p.x)<.94&&p.y<.8&&p.y>minViewY))break;
     camera.position.sub(defaultTarget).multiplyScalar(1.025).add(defaultTarget);controls.update();
   }
-  // Reduce the projected size by 20% after fitting, retaining the reference viewing angle.
-  camera.zoom=.8;camera.updateProjectionMatrix();
+  // Shrink the previous 0.8 composition by another 30%, retaining the reference viewing angle.
+  camera.zoom=.56;camera.updateProjectionMatrix();
   defaultCamera.copy(camera.position);controls.minDistance=camera.position.distanceTo(defaultTarget)*.76;controls.maxDistance=camera.position.distanceTo(defaultTarget)*1.3;
   tableShadows.forEach(({mesh,object})=>mesh.position.set(object.position.x,.018,object.position.z));renderer.shadowMap.needsUpdate=true;renderer.setSize(w,h);renderer.setPixelRatio(Math.min(devicePixelRatio,portrait?1.35:1.5));if(composer){composer.setPixelRatio(Math.min(devicePixelRatio,1.25));composer.setSize(w,h);}
 }
@@ -529,9 +529,9 @@ function updateLighting(dt,time) {
   bezelLight.intensity=screenPower*(.035+nightBlend*2.8)*flicker*lightGain;
   screenMaterial.uniforms.uPower.value=screenPower;screenMaterial.uniforms.uNight.value=nightBlend;
   // The pale Untitled artwork needs less emission and bloom than the two dark artworks.
-  screenMaterial.uniforms.uBrightness.value=untitled?.62:1+nightBlend*1.15;
+  screenMaterial.uniforms.uBrightness.value=untitled?.651:1+nightBlend*1.15;
   reflector.visible=nightBlend>.01&&screenPower>.01;reflector.material.uniforms.uStrength.value=.22*nightBlend*screenPower;
-  bloom.strength=(untitled?.14:.46)*nightBlend*screenPower;bloom.enabled=nightBlend>.01&&screenPower>.01;
+  bloom.strength=(untitled?.147:.46)*nightBlend*screenPower;bloom.enabled=nightBlend>.01&&screenPower>.01;
   if(Math.abs(oldNight-nightBlend)>.002||Math.abs(oldPower-screenPower)>.002)renderer.shadowMap.needsUpdate=true;
   canvas.dataset.power=screenPower>.01?'on':'off';
 }

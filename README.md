@@ -6,10 +6,11 @@
 
 ## 互動
 
-- 移到或點按卡帶：卡帶升起，CRT 電視切換品牌畫面。
+- 移到或點按卡帶：卡帶升起。電視初始關機，插入卡帶後才會開機顯示該品牌；取出後熄機。
 - 拖動卡帶到 Super Famicom 插槽：插入卡帶；換帶時，舊卡帶返回架上。
-- 拖回卡帶架，或按「取出」／主機 EJECT：取出卡帶。
+- 拖回卡帶架，或按主機 EJECT：取出卡帶。點按已開機的電視可探索該品牌。
 - 拖動空白位置轉動視角，滾輪縮放，右上角按鈕重設視角。
+- 右上角月亮按鈕切換夜間模式：環境燈光漸暗，螢幕投射品牌色燈光，並呈現光暈、動態陰影及柔化地面反射。
 - 支援手機觸控、鍵盤操作及減少動態效果偏好。音效預設關閉。
 
 ## 本機執行
@@ -34,12 +35,12 @@ ES Modules 需要 HTTP 伺服器，請勿直接雙擊 `index.html`。
 | `index.html` | 網頁結構及 Three.js import map |
 | `vendor/` | 本機隨附的 Three.js 0.169.0 及必要 addons |
 
-在 `app.js` 的 `WORLDS` 設定品牌名稱、配色及網址。目前三個 `url` 都是 `null`，探索按鈕會顯示「即將登場」；提供正式品牌網址後即可替換。
+在 `app.js` 的 `WORLDS` 設定品牌名稱、配色及網址。目前三個 `url` 都是 `null`，點按已開機的電視會顯示「即將登場」；提供正式品牌網址後即可替換。
 
 GitHub Pages 使用 `main` 分支根目錄；推送更新後會自動重新發布。
 
 ## 技術與第三方檔案
 
-Three.js、WebGL、CanvasTexture、ShaderMaterial、OrbitControls；字型由 Google Fonts 載入。瀏覽器需支援 WebGL，並建議啟用硬件加速。
+Three.js、WebGL、CanvasTexture、ShaderMaterial、OrbitControls、UnrealBloomPass、Reflector；字型由 Google Fonts 載入。瀏覽器需支援 WebGL，並建議啟用硬件加速。
 
 Three.js 授權見 [`vendor/THREE-LICENSE.txt`](vendor/THREE-LICENSE.txt)。

@@ -122,16 +122,16 @@ function createCRT() {
   geometry.computeVertexNormals();
   screenCanvas = document.createElement('canvas'); screenCanvas.width = 1024; screenCanvas.height = 768;
   screenTexture = textureFromCanvas(screenCanvas);
-  screenMaterial = new THREE.ShaderMaterial({ uniforms: { uMap: { value: screenTexture }, uTime: { value: 0 }, uSwitch: { value: 0 }, uPower: { value: 0 }, uNight: { value: 0 } },
+  screenMaterial = new THREE.ShaderMaterial({ uniforms: { uMap: { value: screenTexture }, uTime: { value: 0 }, uSwitch: { value: 0 }, uPower: { value: 0 }, uNight: { value: 0 }, uBrightness: { value: 1 } },
     vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-    fragmentShader: `uniform sampler2D uMap;uniform float uTime;uniform float uSwitch;uniform float uPower;uniform float uNight;varying vec2 vUv;
+    fragmentShader: `uniform sampler2D uMap;uniform float uTime;uniform float uSwitch;uniform float uPower;uniform float uNight;uniform float uBrightness;varying vec2 vUv;
       float noise(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
       void main(){vec2 q=abs(vUv-.5)-vec2(.458,.455);float edge=length(max(q,0.))+min(max(q.x,q.y),0.)-.039;if(edge>0.)discard;
       vec2 uv=vUv;uv.x+=uSwitch*.012*sin(uv.y*87.+uTime*43.);vec3 col=texture2D(uMap,uv).rgb;
       col*=.96+.04*sin(vUv.y*720.);float vignette=1.-.38*pow(length((vUv-.5)*1.36),2.);col*=vignette;
       float glare=exp(-length((vUv-vec2(.2,.83))*vec2(3.,2.))*3.)*.045;col+=vec3(glare);
       float snow=noise(floor(vUv*vec2(550.,400.))+floor(uTime*32.));col=mix(col,vec3(snow),uSwitch*.85);
-      vec3 glass=vec3(.012,.018,.019)+vec3(.012)*exp(-length((vUv-vec2(.18,.88))*vec2(2.,2.))*2.);glass*=1.-uNight*.85;col=mix(glass,col*(1.+uNight*1.15),uPower);gl_FragColor=vec4(col,1.);#include <tonemapping_fragment>\n#include <colorspace_fragment>}`.replace(';#include',';\n#include'), toneMapped: false });
+      vec3 glass=vec3(.012,.018,.019)+vec3(.012)*exp(-length((vUv-vec2(.18,.88))*vec2(2.,2.))*2.);glass*=1.-uNight*.85;col=mix(glass,col*uBrightness,uPower);gl_FragColor=vec4(col,1.);#include <tonemapping_fragment>\n#include <colorspace_fragment>}`.replace(';#include',';\n#include'), toneMapped: false });
   const display = new THREE.Mesh(geometry, screenMaterial); display.position.set(-.04, 2.61, 1.665); display.userData.action='explore';actionMeshes.push(display);g.add(display);
   const holeGeo = new THREE.CylinderGeometry(.014, .014, .018, 6);
   const holes = new THREE.InstancedMesh(holeGeo, M.speaker, 80); const dummy = new THREE.Object3D(); let index = 0;
@@ -309,7 +309,9 @@ function updateUI() {
   document.querySelector('#explore-button').hidden=!installed;
   document.querySelector('#insert-button').setAttribute('aria-label',`將 ${WORLDS[selected].name} 插入主機`);
   document.querySelectorAll('[data-key]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.key===selected)));
-  ledMaterial.emissiveIntensity=installed?2.1:0;
+  ledMaterial.color.set(installed?'#398d49':'#892b20');
+  ledMaterial.emissive.set(installed?'#48f66a':'#e33822');
+  ledMaterial.emissiveIntensity=installed?1.8:.45;
 }
 function selectWorld(key,force=false) {
   if(!WORLDS[key])return;const changed=key!==selected;selected=key;
@@ -402,7 +404,7 @@ function layout() {
   cards.forEach(c=>{c.position.copy(c.userData.target);c.rotation.copy(c.userData.targetRotation);});
   scene.updateMatrixWorld(true);updateCable(portrait);
   if(screenLight){screenLight.position.copy(tv.position).add(new THREE.Vector3(-.04,2.5,1.91));screenLight.target.position.copy(consoleModel.position).add(new THREE.Vector3(0,.45,.45));bezelLight.position.copy(tv.position).add(new THREE.Vector3(-.04,2.61,2.1));}
-  camera.aspect=w/h;camera.fov=portrait?38:33;camera.updateProjectionMatrix();
+  camera.aspect=w/h;camera.fov=portrait?38:33;camera.zoom=1;camera.updateProjectionMatrix();
   defaultTarget.set(portrait?.0:-.65,portrait?1.7:2.15,portrait?1.35:.8);
   controls.minDistance=0;controls.maxDistance=Infinity;const distance=portrait?21.5:(w/h>2?29:30.5);
   defaultCamera.copy(defaultTarget).add(new THREE.Vector3(portrait?-3.8:-7,portrait?7.6:5.7,17).normalize().multiplyScalar(distance));
@@ -415,6 +417,8 @@ function layout() {
     if(points.every(p=>Math.abs(p.x)<.94&&p.y<.8&&p.y>minViewY))break;
     camera.position.sub(defaultTarget).multiplyScalar(1.025).add(defaultTarget);controls.update();
   }
+  // Reduce the projected size by 20% after fitting, retaining the reference viewing angle.
+  camera.zoom=.8;camera.updateProjectionMatrix();
   defaultCamera.copy(camera.position);controls.minDistance=camera.position.distanceTo(defaultTarget)*.76;controls.maxDistance=camera.position.distanceTo(defaultTarget)*1.3;
   tableShadows.forEach(({mesh,object})=>mesh.position.set(object.position.x,.018,object.position.z));renderer.shadowMap.needsUpdate=true;renderer.setSize(w,h);renderer.setPixelRatio(Math.min(devicePixelRatio,portrait?1.35:1.5));if(composer){composer.setPixelRatio(Math.min(devicePixelRatio,1.25));composer.setSize(w,h);}
 }
@@ -520,11 +524,14 @@ function updateLighting(dt,time) {
   screenTint.set(installed==='fire'?'#ffb46f':installed==='untitled'?'#b5cbff':'#cee6a4');
   screenLight.color.lerp(screenTint,reduceMotion.matches?1:1-Math.exp(-dt*7));bezelLight.color.copy(screenLight.color);
   const flicker=reduceMotion.matches?1:1+Math.sin(time*3.2)*.014;
-  screenLight.intensity=screenPower*(.12+nightBlend*75)*flicker;
-  bezelLight.intensity=screenPower*(.035+nightBlend*2.8)*flicker;
+  const untitled=installed==='untitled',lightGain=untitled?.5:1;
+  screenLight.intensity=screenPower*(.12+nightBlend*75)*flicker*lightGain;
+  bezelLight.intensity=screenPower*(.035+nightBlend*2.8)*flicker*lightGain;
   screenMaterial.uniforms.uPower.value=screenPower;screenMaterial.uniforms.uNight.value=nightBlend;
+  // The pale Untitled artwork needs less emission and bloom than the two dark artworks.
+  screenMaterial.uniforms.uBrightness.value=untitled?.62:1+nightBlend*1.15;
   reflector.visible=nightBlend>.01&&screenPower>.01;reflector.material.uniforms.uStrength.value=.22*nightBlend*screenPower;
-  bloom.strength=.46*nightBlend*screenPower;bloom.enabled=nightBlend>.01&&screenPower>.01;
+  bloom.strength=(untitled?.14:.46)*nightBlend*screenPower;bloom.enabled=nightBlend>.01&&screenPower>.01;
   if(Math.abs(oldNight-nightBlend)>.002||Math.abs(oldPower-screenPower)>.002)renderer.shadowMap.needsUpdate=true;
   canvas.dataset.power=screenPower>.01?'on':'off';
 }
@@ -555,7 +562,7 @@ function init() {
   window.addEventListener('resize',()=>{cancelDrag();layout();});window.addEventListener('blur',cancelDrag);
   document.addEventListener('visibilitychange',()=>{active=!document.hidden;});
   document.fonts.ready.then(()=>{drawScreen(clock.elapsedTime,true);cards.forEach(card=>{const old=card.userData.labelMap;const tex=cartridgeLabel(card.userData.key);const mesh=card.children.find(m=>m.material?.map===old);if(mesh){mesh.material.map=tex;mesh.material.needsUpdate=true;}card.userData.labelMap=tex;old.dispose();});});
-  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,night:nightEnabled,nightBlend,screenPower,screenWorld:installed,reflection:reflector.visible,lightIntensity:screenLight.intensity,eject:screenPoint(consoleModel.localToWorld(new THREE.Vector3(0,1.15,.24))),tvScreen:screenPoint(tv.localToWorld(new THREE.Vector3(0,2.61,1.8))),drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cables:cable.children.filter(c=>c.isMesh&&c.geometry.type==='TubeGeometry').map(c=>c.name),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
+  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,night:nightEnabled,nightBlend,screenPower,viewZoom:camera.zoom,ledColor:ledMaterial.color.getHexString(),ledEmission:ledMaterial.emissive.getHexString(),screenBrightness:screenMaterial.uniforms.uBrightness.value,bloomStrength:bloom.strength,screenWorld:installed,reflection:reflector.visible,lightIntensity:screenLight.intensity,eject:screenPoint(consoleModel.localToWorld(new THREE.Vector3(0,1.15,.24))),tvScreen:screenPoint(tv.localToWorld(new THREE.Vector3(0,2.61,1.8))),drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cables:cable.children.filter(c=>c.isMesh&&c.geometry.type==='TubeGeometry').map(c=>c.name),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
   requestAnimationFrame(render);
 }
 function render(now) {

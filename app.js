@@ -38,6 +38,8 @@ const dragPlane = new THREE.Plane(), rayPoint = new THREE.Vector3();
 const slot = new THREE.Vector3();
 const insertedPosition = new THREE.Vector3();
 const defaultCamera = new THREE.Vector3(), defaultTarget = new THREE.Vector3();
+const screenFocus = new THREE.Vector3(), screenCorners = [], focusOffset = new THREE.Vector3(), focusTarget = new THREE.Vector3();
+let focusProbe, zoomFocusProgress=0, pendingTVTap=null;
 const temp = new THREE.Vector3();
 const M = {};
 
@@ -419,8 +421,32 @@ function layout() {
   }
   // Shrink the previous 0.8 composition by another 30%, retaining the reference viewing angle.
   camera.zoom=.56;camera.updateProjectionMatrix();
-  defaultCamera.copy(camera.position);controls.minDistance=camera.position.distanceTo(defaultTarget)*.5;controls.maxDistance=camera.position.distanceTo(defaultTarget)*1.3;
+  screenFocus.copy(tv.localToWorld(new THREE.Vector3(-.04,2.61,1.73)));
+  screenCorners.length=0;
+  for(const x of [-1.915,1.915])for(const y of [-1.425,1.425])screenCorners.push(tv.localToWorld(new THREE.Vector3(x-.04,y+2.61,1.665)));
+  zoomFocusProgress=0;
+  defaultCamera.copy(camera.position);controls.minDistance=camera.position.distanceTo(defaultTarget)*.25;controls.maxDistance=camera.position.distanceTo(defaultTarget)*1.3;
   tableShadows.forEach(({mesh,object})=>mesh.position.set(object.position.x,.018,object.position.z));renderer.shadowMap.needsUpdate=true;renderer.setSize(w,h);renderer.setPixelRatio(Math.min(devicePixelRatio,portrait?1.35:1.5));if(composer){composer.setPixelRatio(Math.min(devicePixelRatio,1.25));composer.setSize(w,h);}
+}
+function updateZoomFocus() {
+  const distance=camera.position.distanceTo(controls.target);
+  const initialDistance=defaultCamera.distanceTo(defaultTarget);
+  const progress=THREE.MathUtils.clamp((initialDistance-distance)/(initialDistance-controls.minDistance),0,1);
+  zoomFocusProgress=THREE.MathUtils.smoothstep(progress,0,1);
+  focusOffset.copy(camera.position).sub(controls.target);
+  focusTarget.copy(defaultTarget).lerp(screenFocus,zoomFocusProgress);
+  controls.target.copy(focusTarget);camera.position.copy(focusTarget).add(focusOffset);
+
+  // Fit the real CRT corners at the closest stop for both wide and portrait screens.
+  focusProbe.fov=camera.fov;focusProbe.aspect=camera.aspect;focusProbe.zoom=1;focusProbe.updateProjectionMatrix();
+  focusProbe.position.copy(screenFocus).addScaledVector(focusOffset,controls.minDistance/distance);
+  focusProbe.lookAt(screenFocus);focusProbe.updateMatrixWorld();
+  let extentX=0,extentY=0;
+  for(const corner of screenCorners){temp.copy(corner).project(focusProbe);extentX=Math.max(extentX,Math.abs(temp.x));extentY=Math.max(extentY,Math.abs(temp.y));}
+  const closeZoom=Math.min(.88/extentX,.84/extentY);
+  const zoom=THREE.MathUtils.lerp(.56,closeZoom,zoomFocusProgress);
+  if(Math.abs(camera.zoom-zoom)>.000001){camera.zoom=zoom;camera.updateProjectionMatrix();}
+  camera.lookAt(controls.target);camera.updateMatrixWorld();
 }
 function screenPoint(v) {
   const p=v.clone().project(camera);const r=canvas.getBoundingClientRect();return{x:r.left+(p.x+1)*r.width/2,y:r.top+(1-p.y)*r.height/2};
@@ -440,18 +466,22 @@ function isSlotDrop(e) {
 }
 function showDropHint(valid) {const p=screenPoint(slot);hint.style.left=p.x+'px';hint.style.top=(p.y-12)+'px';hint.textContent=valid?'放開，插入卡帶':'拖到主機插槽';hint.classList.add('is-visible');hint.classList.toggle('is-over',valid);slotRing.material.color.set(valid?'#9fbf5e':'#cad69e');}
 function cancelDrag() {
+  pendingTVTap=null;
   if(!pointerStart&&!dragging)return;
   if(dragging){const c=dragging.card;if(installed===c.userData.key){c.userData.target.copy(insertedPosition);c.userData.mode='inserted';}else homeCard(c);}
   dragging=null;pointerStart=null;controls.enabled=true;slotRing.visible=false;hint.classList.remove('is-visible','is-over');canvas.classList.remove('is-dragging');announce('已取消拖曳。');
 }
 function onPointerDown(e) {
-  if(e.button!==0||!e.isPrimary)return;pointerRay(e);const card=hitCard();
+  if(!e.isPrimary){pendingTVTap=null;return;}
+  if(e.button!==0)return;pointerRay(e);const card=hitCard();
   if(card){controls.enabled=false;e.stopImmediatePropagation();selectWorld(card.userData.key);pointerStart={x:e.clientX,y:e.clientY,card,id:e.pointerId};canvas.setPointerCapture(e.pointerId);return;}
   const action=raycaster.intersectObjects(actionMeshes,false)[0]?.object.userData.action;
-  if(action){controls.enabled=false;e.stopImmediatePropagation();if(action==='eject')ejectCard();else if(installed)exploreWorld();setTimeout(()=>controls.enabled=true,0);return;}
+  if(action==='explore'){pendingTVTap={id:e.pointerId,x:e.clientX,y:e.clientY};return;}
+  if(action==='eject'){controls.enabled=false;e.stopImmediatePropagation();ejectCard();setTimeout(()=>controls.enabled=true,0);return;}
   if(raycaster.intersectObject(slotCollider,false).length){controls.enabled=false;e.stopImmediatePropagation();insertCard(selected);setTimeout(()=>controls.enabled=true,0);}
 }
 function onPointerMove(e) {
+  if(pendingTVTap&&Math.hypot(e.clientX-pendingTVTap.x,e.clientY-pendingTVTap.y)>6)pendingTVTap=null;
   pointerRay(e);
   if(pointerStart&&e.pointerId===pointerStart.id){
     if(!dragging&&Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y)>5){
@@ -467,6 +497,7 @@ function onPointerMove(e) {
   if(card){canvas.dataset.hover=card.userData.key;selectWorld(card.userData.key);}else delete canvas.dataset.hover;
 }
 function onPointerUp(e) {
+  if(pendingTVTap&&pendingTVTap.id===e.pointerId){const tap=pendingTVTap;pendingTVTap=null;if(installed&&Math.hypot(e.clientX-tap.x,e.clientY-tap.y)<=6)exploreWorld();}
   if(!pointerStart||e.pointerId!==pointerStart.id)return;const started=pointerStart;pointerStart=null;
   if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
   controls.enabled=true;canvas.classList.remove('is-dragging');hint.classList.remove('is-visible','is-over');slotRing.visible=false;
@@ -531,7 +562,7 @@ function updateLighting(dt,time) {
   // The pale Untitled artwork needs less emission and bloom than the two dark artworks.
   screenMaterial.uniforms.uBrightness.value=untitled?.651:1+nightBlend*1.15;
   reflector.visible=nightBlend>.01&&screenPower>.01;reflector.material.uniforms.uStrength.value=.22*nightBlend*screenPower;
-  bloom.strength=(untitled?.147:.46)*nightBlend*screenPower;bloom.enabled=nightBlend>.01&&screenPower>.01;
+  bloom.strength=(untitled?.1617:.46)*nightBlend*screenPower;bloom.enabled=nightBlend>.01&&screenPower>.01;
   if(Math.abs(oldNight-nightBlend)>.002||Math.abs(oldPower-screenPower)>.002)renderer.shadowMap.needsUpdate=true;
   canvas.dataset.power=screenPower>.01?'on':'off';
 }
@@ -540,7 +571,7 @@ function init() {
   renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.88;
   renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.needsUpdate=true;
   scene=new THREE.Scene();scene.background=new THREE.Color('#f5f5f2');scene.fog=new THREE.Fog('#f5f5f2',27,70);
-  camera=new THREE.PerspectiveCamera(33,innerWidth/innerHeight,.1,100);
+  camera=new THREE.PerspectiveCamera(33,innerWidth/innerHeight,.1,100);focusProbe=new THREE.PerspectiveCamera();
   controls=new OrbitControls(camera,canvas);controls.enableDamping=true;controls.dampingFactor=.07;controls.enablePan=false;controls.enableZoom=true;controls.minPolarAngle=.75;controls.maxPolarAngle=1.3;controls.minAzimuthAngle=-.78;controls.maxAzimuthAngle=.65;controls.rotateSpeed=.45;controls.addEventListener('start',()=>{orbiting=true;});controls.addEventListener('end',()=>{orbiting=false;orbitSettles=performance.now()+450;});
   const pmrem=new THREE.PMREMGenerator(renderer);const room=new RoomEnvironment();scene.environment=pmrem.fromScene(room,.04).texture;scene.environmentIntensity=.6;room.dispose();pmrem.dispose();
   hemisphere=new THREE.HemisphereLight('#ffffff','#b7b5a9',.7);scene.add(hemisphere);
@@ -562,7 +593,7 @@ function init() {
   window.addEventListener('resize',()=>{cancelDrag();layout();});window.addEventListener('blur',cancelDrag);
   document.addEventListener('visibilitychange',()=>{active=!document.hidden;});
   document.fonts.ready.then(()=>{drawScreen(clock.elapsedTime,true);cards.forEach(card=>{const old=card.userData.labelMap;const tex=cartridgeLabel(card.userData.key);const mesh=card.children.find(m=>m.material?.map===old);if(mesh){mesh.material.map=tex;mesh.material.needsUpdate=true;}card.userData.labelMap=tex;old.dispose();});});
-  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,night:nightEnabled,nightBlend,screenPower,viewZoom:camera.zoom,cameraDistance:camera.position.distanceTo(controls.target),initialDistance:defaultCamera.distanceTo(defaultTarget),minDistance:controls.minDistance,ledColor:ledMaterial.color.getHexString(),ledEmission:ledMaterial.emissive.getHexString(),screenBrightness:screenMaterial.uniforms.uBrightness.value,bloomStrength:bloom.strength,screenWorld:installed,reflection:reflector.visible,lightIntensity:screenLight.intensity,eject:screenPoint(consoleModel.localToWorld(new THREE.Vector3(0,1.15,.24))),tvScreen:screenPoint(tv.localToWorld(new THREE.Vector3(0,2.61,1.8))),drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cables:cable.children.filter(c=>c.isMesh&&c.geometry.type==='TubeGeometry').map(c=>c.name),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
+  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,night:nightEnabled,nightBlend,screenPower,viewZoom:camera.zoom,zoomFocus:zoomFocusProgress,screenCorners:screenCorners.map(screenPoint),cameraDistance:camera.position.distanceTo(controls.target),initialDistance:defaultCamera.distanceTo(defaultTarget),minDistance:controls.minDistance,ledColor:ledMaterial.color.getHexString(),ledEmission:ledMaterial.emissive.getHexString(),screenBrightness:screenMaterial.uniforms.uBrightness.value,bloomStrength:bloom.strength,screenWorld:installed,reflection:reflector.visible,lightIntensity:screenLight.intensity,eject:screenPoint(consoleModel.localToWorld(new THREE.Vector3(0,1.15,.24))),tvScreen:screenPoint(tv.localToWorld(new THREE.Vector3(0,2.61,1.8))),drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cables:cable.children.filter(c=>c.isMesh&&c.geometry.type==='TubeGeometry').map(c=>c.name),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
   requestAnimationFrame(render);
 }
 function render(now) {
@@ -571,7 +602,7 @@ function render(now) {
   const busy=Math.abs(nightBlend-Number(nightEnabled))>.001||Math.abs(screenPower-Number(!!installed))>.001||dragging||pointerStart||resetCamera||orbiting||now<orbitSettles||cards.some(c=>c.position.distanceToSquared(c.userData.target)>.0001);
   if(now-lastFrame<(busy?30:80))return;lastFrame=now;
   if(resetCamera){const resetAlpha=reduceMotion.matches?1:1-Math.exp(-dt*11);camera.position.lerp(defaultCamera,resetAlpha);controls.target.lerp(defaultTarget,resetAlpha);if(camera.position.distanceTo(defaultCamera)<.015){camera.position.copy(defaultCamera);controls.target.copy(defaultTarget);resetCamera=false;}}
-  controls.update();
+  controls.update();updateZoomFocus();
   cards.forEach(card=>{
     if(dragging?.card===card){renderer.shadowMap.needsUpdate=true;return;}
     temp.copy(card.userData.target);if(card.userData.mode==='rack'&&hovered===card.userData.key){temp.y+=.48;temp.z+=.07;}

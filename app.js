@@ -18,6 +18,7 @@ let selected = 'm9dy', installed = null, hovered = null, dragging = null;
 let soundEnabled = false, audioContext, announcementTimer, insertionTimer;
 let renderer, scene, camera, controls, screenMaterial, screenTexture, screenCanvas, ledMaterial;
 let slotRing, slotCollider, tv, consoleModel, controller, rack, cable, resetTarget;
+const avPorts = [1.13, 1.48, 1.83];
 let transitionStarted = -100, bootUntil = 0, lastScreenPaint = -100, lastFrame = 0;
 let pointerStart = null, resetCamera = false, readyFrames = 0, active = true, orbiting = false, orbitSettles = 0;
 const cards = [], actionMeshes = [], modelObjects = [], tableShadows = [], rackHomes = new Map();
@@ -123,14 +124,26 @@ function createCRT() {
       gl_FragColor=vec4(col,1.);#include <tonemapping_fragment>\n#include <colorspace_fragment>}`.replace(';#include',';\n#include'), toneMapped: false });
   const display = new THREE.Mesh(geometry, screenMaterial); display.position.set(-.04, 2.61, 1.665); g.add(display);
   const holeGeo = new THREE.CylinderGeometry(.014, .014, .018, 6);
-  const holes = new THREE.InstancedMesh(holeGeo, M.speaker, 160); const dummy = new THREE.Object3D(); let index = 0;
-  for (const side of [-1, 1]) for (let col = 0; col < 16; col++) for (let row = 0; row < 5; row++) {
+  const holes = new THREE.InstancedMesh(holeGeo, M.speaker, 80); const dummy = new THREE.Object3D(); let index = 0;
+  for (const side of [-1]) for (let col = 0; col < 16; col++) for (let row = 0; row < 5; row++) {
     dummy.position.set(side * 1.76 + (col - 7.5) * .053, .49 + row * .063, 1.484); dummy.rotation.x = Math.PI / 2; dummy.updateMatrix(); holes.setMatrixAt(index++, dummy.matrix);
   }
   g.add(holes);
   for (let i = 0; i < 6; i++) cylinder(g, .042, .029, M.darkPlastic, -.87 + i * .25, .59, 1.505, true);
-  cylinder(g, .097, .025, M.tv, .9, .59, 1.515, true);
-  cylinder(g, .018, .035, new THREE.MeshStandardMaterial({ color: '#a74a33', emissive: '#7c2416', emissiveIntensity: .2 }), .65, .59, 1.505, true);
+  cylinder(g, .097, .025, M.tv, .59, .59, 1.515, true);
+  cylinder(g, .018, .035, new THREE.MeshStandardMaterial({ color: '#a74a33', emissive: '#7c2416', emissiveIntensity: .2 }), .34, .59, 1.505, true);
+  // Front composite AV sockets and molded RCA plugs, connected by the cable loom.
+  box(g, 1.09, .28, .024, .012, M.darkPlastic, 1.48, .59, 1.485);
+  avPorts.forEach((x, i) => {
+    const color = ['#d6ac45', '#dddcd1', '#b94e3e'][i];
+    const sleeve = new THREE.MeshStandardMaterial({ color, roughness: .53 });
+    cylinder(g, .087, .045, M.metal, x, .59, 1.52, true);
+    cylinder(g, .07, .16, sleeve, x, .59, 1.61, true);
+    cylinder(g, .048, .16, M.plug, x, .59, 1.75, true);
+    for (let j = 0; j < 3; j++) cylinder(g, .053, .018, M.plugDetail, x, .59, 1.72 + j * .04, true);
+  });
+  label(g, 'VIDEO   L   R', .96, .065, [1.48, .37, 1.495], { size: 48 });
+  box(g, .21, .2, .16, .045, M.plug, -.9, .46, -1.4);
   label(g, 'STEREO  •  COLOR MONITOR', 1.35, .08, [0, .82, 1.491], { size: 35, color: '#5e6157' });
   label(g, 'AV  ·  1', .27, .05, [-.89, .41, 1.493], { size: 45 });
   box(g, 3.55, .19, 1.95, .08, M.darkPlastic, 0, .12, .1);
@@ -175,6 +188,9 @@ function createConsole() {
   ledMaterial = new THREE.MeshStandardMaterial({ color:'#59291e',emissive:'#dc3f19',emissiveIntensity:0 });
   box(g, .13, .017, .035, .009, ledMaterial, 0, 1.032, .93);
   for (const x of [-1.4,1.4]) for(const z of [-1,1]) cylinder(g,.13,.06,M.rubber,x,.093,z);
+  box(g, .53, .23, .13, .045, M.darkPlastic, .86, .52, -1.55);
+  box(g, .4, .18, .28, .04, M.plug, .86, .52, -1.68);
+  label(g, 'AV MULTI OUT', .76, .11, [.86, 1.028, -1.23], { size: 56 }, true);
   return g;
 }
 function createController() {
@@ -307,38 +323,83 @@ function ejectCard() {
   if(!installed)return;clearTimeout(insertionTimer);const key=installed;installed=null;
   homeCard(cards.find(c=>c.userData.key===key));selectWorld(selected,true);announce(`${WORLDS[key].name} 已取出。`);
 }
-function updateCable() {
-  if(cable){scene.remove(cable);cable.geometry.dispose();}
-  const a=consoleModel.position.clone().add(new THREE.Vector3(-.94,.47,1.93));
-  const b=new THREE.Vector3(0,.23,-.62).applyMatrix4(controller.matrixWorld);
-  const curve=new THREE.CatmullRomCurve3([a,a.clone().add(new THREE.Vector3(0,-.3,.28)),new THREE.Vector3(a.x-.3,.08,a.z+1.08),new THREE.Vector3(b.x-.5,.07,a.z+.9),new THREE.Vector3(b.x-.9,.12,b.z-.2),b]);
-  cable=new THREE.Mesh(new THREE.TubeGeometry(curve,90,.047,10,false),M.cable);cable.castShadow=true;scene.add(cable);
+function updateCable(portrait) {
+  if(cable){scene.remove(cable);cable.traverse(o=>o.geometry?.dispose());}
+  cable=new THREE.Group();cable.name='Connected desk cables';scene.add(cable);
+  const point=(model,x,y,z)=>model.localToWorld(new THREE.Vector3(x,y,z));
+  const wire=(name,points,radius=.036)=>{
+    const curve=new THREE.CatmullRomCurve3(points,false,'centripetal');
+    const mesh=new THREE.Mesh(new THREE.TubeGeometry(curve,Math.max(64,points.length*7),radius,8,false),M.cable);
+    mesh.name=name;mesh.castShadow=true;mesh.receiveShadow=true;cable.add(mesh);return mesh;
+  };
+  const a=point(consoleModel,-.94,.47,1.93),b=point(controller,0,.23,-.62);
+  wire('Controller lead',portrait?[
+    a,a.clone().add(new THREE.Vector3(0,-.22,.18)),
+    new THREE.Vector3(b.x+.45,.075,b.z-.45),
+    new THREE.Vector3(b.x-.2,.075,b.z-.4),b
+  ]:[
+    a,a.clone().add(new THREE.Vector3(0,-.24,.34)),
+    new THREE.Vector3(a.x-.3,.08,a.z+.71),
+    new THREE.Vector3(b.x-.3,.065,a.z+.62),
+    new THREE.Vector3(b.x-1.72,.065,b.z+.38),
+    new THREE.Vector3(b.x-.65,.1,b.z-.49),b
+  ],.045);
+
+  // The three RCA tails merge into one gently coiled composite cable behind the console.
+  const junction=point(tv,2.72,.095,2.27);
+  avPorts.forEach((x,i)=>{
+    const start=point(tv,x,.59,1.83);
+    wire('RCA '+['video','left audio','right audio'][i],[start,
+      start.clone().add(new THREE.Vector3(.02,0,.12)),
+      point(tv,x+.15,.18,2.14+i*.065),
+      point(tv,2.15+i*.1,.085,2.5+i*.09),junction],.027);
+  });
+  const avEnd=point(consoleModel,.86,.52,-1.84);
+  const coilCenter=point(tv,portrait?3.15:3.95,.08,portrait?3.95:3.0);
+  const coil=[junction];
+  for(let i=0;i<=36;i++){
+    const angle=Math.PI+i/36*Math.PI*3.65;
+    coil.push(new THREE.Vector3(coilCenter.x+Math.cos(angle)*(.86-i*.009),.078+i*.002,coilCenter.z+Math.sin(angle)*(.48-i*.0045)));
+  }
+  coil.push(point(consoleModel,2.18,.12,-1.92),avEnd.clone().add(new THREE.Vector3(.25,-.26,-.3)),avEnd.clone().add(new THREE.Vector3(0,-.05,-.17)),avEnd);
+  wire('Coiled AV cable',coil,.041);
+
+  // A separate power lead sits in relaxed loops behind the television.
+  const power=[point(tv,-.9,.46,-1.48),point(tv,-.9,.15,-1.72)];
+  for(let i=0;i<=34;i++){
+    const angle=.3+i/34*Math.PI*3.45;
+    power.push(point(tv,-3+Math.cos(angle)*(.95-i*.005),.065+i*.0012,-1+Math.sin(angle)*.72));
+  }
+  const end=point(tv,-1.35,.085,-1.81);
+  power.push(end);wire('TV power lead',power,.034);
+  box(cable,.2,.15,.35,.045,M.plug,end.x,end.y+.03,end.z-.16);
+  for(const dx of [-.052,.052])box(cable,.027,.04,.13,.01,M.metal,end.x+dx,end.y+.03,end.z-.39);
 }
 function layout() {
   const w=innerWidth,h=innerHeight,portrait=w/h<.85;
-  tv.position.set(portrait?-.55:-1.25,0,-1.65);
-  consoleModel.position.set(portrait?-.5:-1.18,0,2.03);
-  controller.position.set(portrait?-1.8:-4.06,0,portrait?4.95:4.05);controller.rotation.y=portrait?-.17:-.22;
-  rack.position.set(portrait?1.5:3.2,0,portrait?4.98:1.04);rack.rotation.y=-.3;
+  tv.position.set(portrait?-.7:-1.35,0,-1.9);
+  consoleModel.position.set(portrait?-.5:-.3,0,portrait?3.1:4.35);
+  controller.position.set(portrait?-1.8:-3.65,0,portrait?6.45:5.35);controller.rotation.y=portrait?-.12:.13;
+  rack.position.set(portrait?3.3:3.6,0,portrait?.0:-1.0);rack.rotation.y=portrait?-.13:-.18;
   scene.updateMatrixWorld(true);
   cards.forEach((card,i)=>{
     const local=new THREE.Vector3(0,1.08+i*.13,.8-i*.79);const position=rack.localToWorld(local);
-    const rotation=new THREE.Euler(-.055,-.3,0);rackHomes.set(card.userData.key,{position:position.clone(),rotation});
+    const rotation=new THREE.Euler(-.055,rack.rotation.y,0);rackHomes.set(card.userData.key,{position:position.clone(),rotation});
     if(card.userData.mode!=='inserted')homeCard(card);
   });
   slot.copy(consoleModel.position).add(new THREE.Vector3(0,1.105,-.83));insertedPosition.copy(slot).add(new THREE.Vector3(0,.47,0));
   slotRing.position.copy(slot);slotRing.position.y+=.014;slotCollider.position.copy(slot);
   if(installed){const card=cards.find(c=>c.userData.key===installed);card.userData.target.copy(insertedPosition);}
   cards.forEach(c=>{c.position.copy(c.userData.target);c.rotation.copy(c.userData.targetRotation);});
-  scene.updateMatrixWorld(true);updateCable();
+  scene.updateMatrixWorld(true);updateCable(portrait);
   camera.aspect=w/h;camera.fov=portrait?38:33;camera.updateProjectionMatrix();
-  defaultTarget.set(portrait?.05:0,1.35,portrait?.9:.72);
-  controls.minDistance=0;controls.maxDistance=Infinity;const distance=portrait?19.2:(w/h>2?15:15.8);
-  defaultCamera.copy(defaultTarget).add(new THREE.Vector3(portrait?3.8:5.8,6.5,14).normalize().multiplyScalar(distance));
+  defaultTarget.set(portrait?-.05:.1,1.4,portrait?1.35:1.0);
+  controls.minDistance=0;controls.maxDistance=Infinity;const distance=portrait?20.5:(w/h>2?20.5:21.5);
+  defaultCamera.copy(defaultTarget).add(new THREE.Vector3(portrait?-3.8:-6.2,7.6,16).normalize().multiplyScalar(distance));
   camera.position.copy(defaultCamera);controls.target.copy(defaultTarget);controls.update();
   // Fit real model bounds inside the scene, leaving space for the bottom controls.
   const minViewY=-1+2*(h<550?105:160)/h;
-  const corners=[];modelObjects.forEach(o=>{const bounds=new THREE.Box3().setFromObject(o);for(const x of [bounds.min.x,bounds.max.x])for(const y of [bounds.min.y,bounds.max.y])for(const z of [bounds.min.z,bounds.max.z])corners.push(new THREE.Vector3(x,y,z));});
+  const corners=[];[...modelObjects,cable,...cards].forEach(o=>{const bounds=new THREE.Box3().setFromObject(o);for(const x of [bounds.min.x,bounds.max.x])for(const y of [bounds.min.y,bounds.max.y])for(const z of [bounds.min.z,bounds.max.z])corners.push(new THREE.Vector3(x,y,z));});
   for(let i=0;i<40;i++){
     camera.updateMatrixWorld();const points=corners.map(p=>p.clone().project(camera));
     if(points.every(p=>Math.abs(p.x)<.94&&p.y<.8&&p.y>minViewY))break;
@@ -402,7 +463,7 @@ function init() {
   renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.needsUpdate=true;
   scene=new THREE.Scene();scene.background=new THREE.Color('#f5f5f2');scene.fog=new THREE.Fog('#f5f5f2',27,70);
   camera=new THREE.PerspectiveCamera(33,innerWidth/innerHeight,.1,100);
-  controls=new OrbitControls(camera,canvas);controls.enableDamping=true;controls.dampingFactor=.07;controls.enablePan=false;controls.enableZoom=true;controls.minPolarAngle=.75;controls.maxPolarAngle=1.3;controls.minAzimuthAngle=-.48;controls.maxAzimuthAngle=.75;controls.rotateSpeed=.45;controls.addEventListener('start',()=>{orbiting=true;});controls.addEventListener('end',()=>{orbiting=false;orbitSettles=performance.now()+450;});
+  controls=new OrbitControls(camera,canvas);controls.enableDamping=true;controls.dampingFactor=.07;controls.enablePan=false;controls.enableZoom=true;controls.minPolarAngle=.75;controls.maxPolarAngle=1.3;controls.minAzimuthAngle=-.78;controls.maxAzimuthAngle=.65;controls.rotateSpeed=.45;controls.addEventListener('start',()=>{orbiting=true;});controls.addEventListener('end',()=>{orbiting=false;orbitSettles=performance.now()+450;});
   const pmrem=new THREE.PMREMGenerator(renderer);const room=new RoomEnvironment();scene.environment=pmrem.fromScene(room,.04).texture;scene.environmentIntensity=.6;room.dispose();pmrem.dispose();
   scene.add(new THREE.HemisphereLight('#ffffff','#b7b5a9',.7));
   const key=new THREE.DirectionalLight('#fff9ed',2.7);key.position.set(-4.5,10,7);key.castShadow=true;key.shadow.mapSize.set(1024,1024);key.shadow.camera.left=-11;key.shadow.camera.right=11;key.shadow.camera.top=10;key.shadow.camera.bottom=-10;key.shadow.camera.far=30;key.shadow.normalBias=.035;key.shadow.bias=-.0002;key.shadow.radius=4;scene.add(key);
@@ -423,7 +484,7 @@ function init() {
   window.addEventListener('resize',()=>{cancelDrag();layout();});window.addEventListener('blur',cancelDrag);
   document.addEventListener('visibilitychange',()=>{active=!document.hidden;});
   document.fonts.ready.then(()=>{drawScreen(clock.elapsedTime,true);cards.forEach(card=>{const old=card.userData.labelMap;const tex=cartridgeLabel(card.userData.key);const mesh=card.children.find(m=>m.material?.map===old);if(mesh){mesh.material.map=tex;mesh.material.needsUpdate=true;}card.userData.labelMap=tex;old.dispose();});});
-  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
+  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cables:cable.children.filter(c=>c.isMesh&&c.geometry.type==='TubeGeometry').map(c=>c.name),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
   requestAnimationFrame(render);
 }
 function render(now) {

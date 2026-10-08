@@ -9,9 +9,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 
 const WORLDS = {
-  m9dy: { name: 'M9DY', number: '01', color: '#c4d384', ink: '#233e2e', url: null },
-  fire: { name: '無名火', number: '02', color: '#eeb35e', ink: '#9f3b22', url: null },
-  untitled: { name: 'Untitled Design Agency', number: '03', color: '#bac9ec', ink: '#283c66', url: null },
+  m9dy: { name: 'M9DY', number: '01', color: '#c4d384', ink: '#233e2e', url: null, screenArtwork: './assets/m9dy-screen.jpg', coverArtwork: './assets/m9dy-cover.jpg', artworkBackground: '#000000', glow: '#ff7300' },
+  fire: { name: '無名火', number: '02', color: '#eeb35e', ink: '#9f3b22', url: null, screenArtwork: './assets/fire-screen.jpg', coverArtwork: './assets/fire-cover.jpg', artworkBackground: '#041149', glow: '#355dff' },
+  untitled: { name: 'Untitled Design Agency', number: '03', color: '#bac9ec', ink: '#283c66', url: null, screenArtwork: './assets/untitled-screen.jpg', coverArtwork: './assets/untitled-cover.jpg', artworkBackground: '#fafafa', glow: '#fff4ee' },
 };
 const keys = Object.keys(WORLDS);
 const canvas = document.querySelector('#scene');
@@ -42,6 +42,45 @@ const screenFocus = new THREE.Vector3(), screenCorners = [], focusOffset = new T
 let focusProbe, zoomFocusProgress=0, pendingTVTap=null;
 const temp = new THREE.Vector3();
 const M = {};
+const artworks = new Map();
+
+// Fit the complete artwork without stretching or trimming brand text.
+function drawArtwork(ctx, image, width, height, background) {
+  const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+  const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, (width - w) / 2, (height - h) / 2, w, h);
+}
+function refreshCartridgeLabel(card) {
+  const old = card.userData.labelMap;
+  const mesh = card.children.find(child => child.material?.map === old);
+  if (!mesh) return;
+  const texture = cartridgeLabel(card.userData.key);
+  mesh.material.map = texture;
+  mesh.material.needsUpdate = true;
+  card.userData.labelMap = texture;
+  old.dispose();
+}
+async function loadWorldArtworks() {
+  await Promise.all(keys.flatMap(key => ['screenArtwork', 'coverArtwork'].map(async type => {
+    const path = WORLDS[key][type], image = new Image();
+    image.src = new URL(path, import.meta.url).href;
+    try {
+      await image.decode();
+      artworks.set(path, image);
+      if (type === 'coverArtwork') {
+        const card = cards.find(card => card.userData.key === key);
+        if (card) refreshCartridgeLabel(card);
+      } else if (installed === key) {
+        drawScreen(clock.elapsedTime, true);
+      }
+    } catch {
+      console.warn(`${key} ${type} could not load; using the original artwork.`);
+    }
+  })));
+}
+
 
 function announce(message) {
   clearTimeout(announcementTimer);
@@ -230,6 +269,12 @@ function createController() {
 }
 function cartridgeLabel(key) {
   const world=WORLDS[key],c=document.createElement('canvas');c.width=1024;c.height=410;const ctx=c.getContext('2d');
+  const artwork = artworks.get(world.coverArtwork);
+  if (artwork) {
+    ctx.save();ctx.beginPath();ctx.roundRect(0,0,c.width,c.height,24);ctx.clip();
+    drawArtwork(ctx,artwork,c.width,c.height,world.artworkBackground);
+    ctx.restore();return textureFromCanvas(c);
+  }
   roundedCanvas(ctx,0,0,1024,410,24,world.color);
   let seed=81;for(let i=0;i<5000;i++){seed=(seed*16807)%2147483647;ctx.fillStyle=`rgba(40,45,29,${.008+(seed%20)/1500})`;ctx.fillRect(seed%1024,(seed>>9)%410,1,1);}
   ctx.fillStyle=world.ink;ctx.font='bold 22px Arial';ctx.fillText('SUPER FAMICOM',35,42);ctx.font='18px monospace';ctx.textAlign='right';ctx.fillText('16 BIT / '+world.number,986,42);ctx.textAlign='left';
@@ -282,6 +327,11 @@ function drawScreen(time, force=false) {
   lastScreenPaint=time;const ctx=screenCanvas.getContext('2d'),screenKey=installed,playing=!!installed;
   ctx.clearRect(0,0,1024,768);
   if(!screenKey){ctx.fillStyle='#030605';ctx.fillRect(0,0,1024,768);screenTexture.needsUpdate=true;return;}
+  const world=WORLDS[screenKey],artwork=artworks.get(world.screenArtwork);
+  if(artwork){
+    drawArtwork(ctx,artwork,screenCanvas.width,screenCanvas.height,world.artworkBackground);
+    screenTexture.needsUpdate=true;return;
+  }
   if(screenKey==='m9dy'){
     const gradient=ctx.createRadialGradient(512,410,30,512,410,720);gradient.addColorStop(0,'#274832');gradient.addColorStop(1,'#07160e');ctx.fillStyle=gradient;ctx.fillRect(0,0,1024,768);
     ctx.strokeStyle='rgba(177,215,124,.14)';ctx.lineWidth=2;
@@ -552,7 +602,7 @@ function updateLighting(dt,time) {
   keyLight.intensity=THREE.MathUtils.lerp(2.7,.14,nightBlend);
   fillLight.intensity=THREE.MathUtils.lerp(.7,.065,nightBlend);
   floor.material.color.copy(dayFloor).lerp(nightFloor,nightBlend);
-  screenTint.set(installed==='fire'?'#ffb46f':installed==='untitled'?'#b5cbff':'#cee6a4');
+  screenTint.set(artworks.has(WORLDS[installed]?.screenArtwork)?WORLDS[installed].glow:installed==='fire'?'#ffb46f':installed==='untitled'?'#b5cbff':'#cee6a4');
   screenLight.color.lerp(screenTint,reduceMotion.matches?1:1-Math.exp(-dt*7));bezelLight.color.copy(screenLight.color);
   const flicker=reduceMotion.matches?1:1+Math.sin(time*3.2)*.014;
   const untitled=installed==='untitled',lightGain=untitled?.5:1;
@@ -592,8 +642,9 @@ function init() {
   canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();cancelDrag();active=false;document.querySelector('#fallback').hidden=false;});
   window.addEventListener('resize',()=>{cancelDrag();layout();});window.addEventListener('blur',cancelDrag);
   document.addEventListener('visibilitychange',()=>{active=!document.hidden;});
-  document.fonts.ready.then(()=>{drawScreen(clock.elapsedTime,true);cards.forEach(card=>{const old=card.userData.labelMap;const tex=cartridgeLabel(card.userData.key);const mesh=card.children.find(m=>m.material?.map===old);if(mesh){mesh.material.map=tex;mesh.material.needsUpdate=true;}card.userData.labelMap=tex;old.dispose();});});
-  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,night:nightEnabled,nightBlend,screenPower,viewZoom:camera.zoom,zoomFocus:zoomFocusProgress,screenCorners:screenCorners.map(screenPoint),cameraDistance:camera.position.distanceTo(controls.target),initialDistance:defaultCamera.distanceTo(defaultTarget),minDistance:controls.minDistance,ledColor:ledMaterial.color.getHexString(),ledEmission:ledMaterial.emissive.getHexString(),screenBrightness:screenMaterial.uniforms.uBrightness.value,bloomStrength:bloom.strength,screenWorld:installed,reflection:reflector.visible,lightIntensity:screenLight.intensity,eject:screenPoint(consoleModel.localToWorld(new THREE.Vector3(0,1.15,.24))),tvScreen:screenPoint(tv.localToWorld(new THREE.Vector3(0,2.61,1.8))),drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cables:cable.children.filter(c=>c.isMesh&&c.geometry.type==='TubeGeometry').map(c=>c.name),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
+  document.fonts.ready.then(()=>{drawScreen(clock.elapsedTime,true);cards.forEach(refreshCartridgeLabel);});
+  void loadWorldArtworks();
+  window.__deskDebug=()=>({selected,installed,dragging:dragging?.card.userData.key||null,webgl:renderer.capabilities.isWebGL2,night:nightEnabled,nightBlend,screenPower,viewZoom:camera.zoom,zoomFocus:zoomFocusProgress,screenCorners:screenCorners.map(screenPoint),cameraDistance:camera.position.distanceTo(controls.target),initialDistance:defaultCamera.distanceTo(defaultTarget),minDistance:controls.minDistance,ledColor:ledMaterial.color.getHexString(),ledEmission:ledMaterial.emissive.getHexString(),screenBrightness:screenMaterial.uniforms.uBrightness.value,bloomStrength:bloom.strength,screenWorld:installed,artworksLoaded:artworks.size,screenArtwork:installed&&artworks.has(WORLDS[installed].screenArtwork)?WORLDS[installed].screenArtwork:null,reflection:reflector.visible,lightIntensity:screenLight.intensity,eject:screenPoint(consoleModel.localToWorld(new THREE.Vector3(0,1.15,.24))),tvScreen:screenPoint(tv.localToWorld(new THREE.Vector3(0,2.61,1.8))),drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,slot:screenPoint(slot),rack:screenPoint(rack.position.clone().add(new THREE.Vector3(0,.8,0))),cables:cable.children.filter(c=>c.isMesh&&c.geometry.type==='TubeGeometry').map(c=>c.name),cards:cards.map(c=>({key:c.userData.key,mode:c.userData.mode,point:screenPoint(c.localToWorld(new THREE.Vector3(0,.66,.21))),position:c.position.toArray()}))});
   requestAnimationFrame(render);
 }
 function render(now) {

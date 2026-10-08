@@ -44,3 +44,14 @@ GitHub Pages 使用 `main` 分支根目錄；推送更新後會自動重新發�
 Three.js、WebGL、CanvasTexture、ShaderMaterial、OrbitControls、UnrealBloomPass、Reflector；字型由 Google Fonts 載入。瀏覽器需支援 WebGL，並建議啟用硬件加速。
 
 Three.js 授權見 [`vendor/THREE-LICENSE.txt`](vendor/THREE-LICENSE.txt)。
+
+## 品牌圖片
+
+`assets/` 內為網站用的縮小版本；原圖保留於上層 `web` 資料夾。
+電視畫面及卡帶封面均按原比例完整顯示；圖片載入失敗時保留原有設計。
+
+| 品牌 | 電視画面 | 卡帶封面 | 原圖（畫面／封面） |
+| --- | --- | --- | --- |
+| M9DY | `assets/m9dy-screen.jpg` | `assets/m9dy-cover.jpg` | `logo-solid-05.jpg` / `logo-solid-04.jpg` |
+| 無名火 / ASH IN VOID | `assets/fire-screen.jpg` | `assets/fire-cover.jpg` | `logo-solid-03.jpg` / `logo-solid-02.jpg` |
+| UNTITLED | `assets/untitled-screen.jpg` | `assets/untitled-cover.jpg` | `logo-solid-07.jpg` / `logo-solid-06.jpg` |

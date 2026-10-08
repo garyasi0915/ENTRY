@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
@@ -20,7 +21,7 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const dialog = document.querySelector('#world-dialog');
 const hint = document.querySelector('#drop-hint');
 let nightEnabled=false, nightBlend=0, screenPower=0, screenOnAt=Infinity;
-let composer, bloom, reflector, floor, hemisphere, keyLight, fillLight, screenLight, bezelLight;
+let composer, bloomComposer, bloom, reflector, floor, hemisphere, keyLight, fillLight, screenLight, bezelLight;
 const dayBackground=new THREE.Color('#f5f5f2'),nightBackground=new THREE.Color('#030509');
 const dayFloor=new THREE.Color('#f5f5ef'),nightFloor=new THREE.Color('#252b35');
 const screenTint=new THREE.Color();
@@ -42,6 +43,8 @@ const screenFocus = new THREE.Vector3(), screenCorners = [], focusOffset = new T
 let focusProbe, zoomFocusProgress=0, pendingTVTap=null;
 const temp = new THREE.Vector3();
 const M = {};
+const bloomMask=new THREE.MeshBasicMaterial({color:0x000000});
+const bloomBackground=new THREE.Color(0x000000),bloomMaterials=new Map();
 const artworks = new Map();
 
 // Fit the complete artwork without stretching or trimming brand text.
@@ -395,35 +398,31 @@ function updateCable(portrait) {
     mesh.name=name;mesh.castShadow=true;mesh.receiveShadow=true;cable.add(mesh);return mesh;
   };
   const a=point(consoleModel,-.94,.47,1.93),b=point(controller,0,.23,-.62);
-  wire('Controller lead',portrait?[
-    a,a.clone().add(new THREE.Vector3(0,-.22,.18)),
-    new THREE.Vector3(b.x+.45,.075,b.z-.45),
-    new THREE.Vector3(b.x-.2,.075,b.z-.4),b
-  ]:[
-    a,a.clone().add(new THREE.Vector3(0,-.24,.34)),
-    new THREE.Vector3(a.x-.3,.08,a.z+.71),
-    new THREE.Vector3(b.x-.3,.065,a.z+.62),
-    new THREE.Vector3(b.x-1.72,.065,b.z+.38),
-    new THREE.Vector3(b.x-.65,.1,b.z-.49),b
+  // Leave the plug along its own axis, then loop around the controller's outside edge.
+  wire('Controller lead',[
+    a,point(consoleModel,-.94,.22,2.3),
+    point(controller,1.8,.075,1.1),point(controller,0,.075,1.25),
+    point(controller,-1.95,.075,.65),point(controller,-1.95,.075,-.85),
+    point(controller,-.6,.1,-1.05),point(controller,0,.18,-.9),b
   ],.045);
 
   // The three RCA tails merge into one gently coiled composite cable behind the console.
-  const junction=point(tv,2.72,.095,2.27);
+  const junction=point(tv,1.8,.095,2.9);
   avPorts.forEach((x,i)=>{
     const start=point(tv,x,.59,1.83);
     wire('RCA '+['video','left audio','right audio'][i],[start,
       start.clone().add(new THREE.Vector3(.02,0,.12)),
       point(tv,x+.15,.18,2.14+i*.065),
-      point(tv,2.15+i*.1,.085,2.5+i*.09),junction],.027);
+      point(tv,1.45+i*.1,.085,2.7+i*.065),junction],.027);
   });
   const avEnd=point(consoleModel,.86,.52,-1.84);
-  const coilCenter=point(tv,portrait?3.15:3.95,.08,portrait?3.95:3.0);
+  const coilCenter=point(tv,1.05,.08,3.05);
   const coil=[junction];
   for(let i=0;i<=36;i++){
     const angle=Math.PI+i/36*Math.PI*3.65;
-    coil.push(new THREE.Vector3(coilCenter.x+Math.cos(angle)*(.86-i*.009),.078+i*.002,coilCenter.z+Math.sin(angle)*(.48-i*.0045)));
+    coil.push(new THREE.Vector3(coilCenter.x+Math.cos(angle)*(.58-i*.005),.078+i*.002,coilCenter.z+Math.sin(angle)*(.32-i*.003)));
   }
-  coil.push(point(consoleModel,2.18,.12,-1.92),avEnd.clone().add(new THREE.Vector3(.25,-.26,-.3)),avEnd.clone().add(new THREE.Vector3(0,-.05,-.17)),avEnd);
+  coil.push(point(consoleModel,.86,.1,-2.55),point(consoleModel,.86,.24,-2.25),point(consoleModel,.86,.47,-2.03),avEnd);
   wire('Coiled AV cable',coil,.041);
 
   // A separate power lead sits in relaxed loops behind the television.
@@ -442,7 +441,7 @@ function layout() {
   // Independent rotations make the desk feel casually arranged, as in the reference.
   tv.position.set(portrait?-.9:-1.6,0,-1.9);tv.rotation.y=.08;
   consoleModel.position.set(portrait?-.25:.15,0,portrait?3.3:3.65);consoleModel.rotation.y=-.68;
-  controller.position.set(portrait?-1.8:-3.7,0,portrait?6.5:4.95);controller.rotation.y=-.5;
+  controller.position.set(portrait?-2.8:-3.95,0,portrait?5.5:3.75);controller.rotation.y=-.5;
   rack.position.set(portrait?3.25:4.1,0,portrait?.65:.6);rack.rotation.y=-.72;
   scene.updateMatrixWorld(true);
   cards.forEach((card,i)=>{
@@ -451,7 +450,7 @@ function layout() {
     if(card.userData.mode!=='inserted')homeCard(card);
   });
   slot.copy(consoleModel.localToWorld(new THREE.Vector3(0,1.105,-.83)));insertedPosition.copy(slot).add(new THREE.Vector3(0,.47,0));
-  slotRing.position.copy(slot);slotRing.position.y+=.014;slotCollider.position.copy(slot);slotCollider.rotation.copy(consoleModel.rotation);slotRing.rotation.set(-Math.PI/2,0,-consoleModel.rotation.y);
+  slotRing.position.set(0,1.135,-.83);slotCollider.position.copy(slot);slotCollider.rotation.copy(consoleModel.rotation);
   if(installed){const card=cards.find(c=>c.userData.key===installed);card.userData.target.copy(insertedPosition);card.userData.targetRotation.copy(consoleModel.rotation);}
   cards.forEach(c=>{c.position.copy(c.userData.target);c.rotation.copy(c.userData.targetRotation);});
   scene.updateMatrixWorld(true);updateCable(portrait);
@@ -483,7 +482,7 @@ function layout() {
   for(const x of [-1.915,1.915])for(const y of [-1.425,1.425])screenCorners.push(tv.localToWorld(new THREE.Vector3(x-.04,y+2.61,1.665)));
   zoomFocusProgress=0;
   defaultCamera.copy(camera.position);controls.minDistance=camera.position.distanceTo(defaultTarget)*.25;controls.maxDistance=camera.position.distanceTo(defaultTarget)*1.3;
-  tableShadows.forEach(({mesh,object})=>{mesh.position.set(object.position.x,.018,object.position.z);mesh.rotation.set(-Math.PI/2,0,-object.rotation.y);});renderer.shadowMap.needsUpdate=true;renderer.setSize(w,h);renderer.setPixelRatio(Math.min(devicePixelRatio,portrait?1.35:1.5));if(composer){composer.setPixelRatio(Math.min(devicePixelRatio,1.25));composer.setSize(w,h);}
+  tableShadows.forEach(({mesh,object})=>{mesh.position.set(object.position.x,.018,object.position.z);mesh.rotation.set(-Math.PI/2,0,-object.rotation.y);});renderer.shadowMap.needsUpdate=true;renderer.setSize(w,h);renderer.setPixelRatio(Math.min(devicePixelRatio,portrait?1.35:1.5));if(composer){const ratio=Math.min(devicePixelRatio,1.25);composer.setPixelRatio(ratio);composer.setSize(w,h);bloomComposer.setPixelRatio(ratio);bloomComposer.setSize(w,h);}
 }
 function updateZoomFocus() {
   const distance=camera.position.distanceTo(controls.target);
@@ -593,8 +592,30 @@ function createNightLighting() {
   reflector=new Reflector(new THREE.PlaneGeometry(100,100),{textureWidth:512,textureHeight:512,clipBias:.004,multisample:0,shader:mirrorShader});
   reflector.rotation.x=-Math.PI/2;reflector.position.y=.012;
   reflector.material.transparent=true;reflector.material.depthWrite=false;reflector.material.toneMapped=false;reflector.visible=false;scene.add(reflector);
+  bloomComposer=new EffectComposer(renderer);bloomComposer.renderToScreen=false;
+  bloomComposer.addPass(new RenderPass(scene,camera));
+  bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.95,.85,.5);bloomComposer.addPass(bloom);
   composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));
-  bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.95,.85,.5);composer.addPass(bloom);composer.addPass(new OutputPass());
+  const combinePass=new ShaderPass({
+    uniforms:{tDiffuse:{value:null},bloomTexture:{value:null}},
+    vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+    fragmentShader:'uniform sampler2D tDiffuse;uniform sampler2D bloomTexture;varying vec2 vUv;void main(){gl_FragColor=texture2D(tDiffuse,vUv)+vec4(texture2D(bloomTexture,vUv).rgb,0.);}'
+  });
+  combinePass.uniforms.bloomTexture.value=bloom.renderTargetsHorizontal[0].texture;
+  composer.addPass(combinePass);composer.addPass(new OutputPass());
+}
+// Bloom only the CRT. Opaque black geometry still occludes its light correctly.
+function renderNight(dt) {
+  const background=scene.background,reflectionVisible=reflector.visible,shadows=renderer.shadowMap.enabled;
+  scene.background=bloomBackground;reflector.visible=false;renderer.shadowMap.enabled=false;
+  scene.traverse(object=>{
+    if(object.isMesh&&object.material.visible!==false&&object.material!==screenMaterial){bloomMaterials.set(object,object.material);object.material=bloomMask;}
+  });
+  try {bloomComposer.render(dt);} finally {
+    bloomMaterials.forEach((material,object)=>{object.material=material;});bloomMaterials.clear();
+    scene.background=background;reflector.visible=reflectionVisible;renderer.shadowMap.enabled=shadows;
+  }
+  composer.render(dt);
 }
 function updateLighting(dt,time) {
   const target=Number(nightEnabled),powerTarget=Number(!!installed&&time>=screenOnAt);
@@ -612,14 +633,15 @@ function updateLighting(dt,time) {
   screenTint.set(artworks.has(WORLDS[installed]?.screenArtwork)?WORLDS[installed].glow:installed==='fire'?'#ffb46f':installed==='untitled'?'#b5cbff':'#cee6a4');
   screenLight.color.lerp(screenTint,reduceMotion.matches?1:1-Math.exp(-dt*7));bezelLight.color.copy(screenLight.color);
   const flicker=reduceMotion.matches?1:1+Math.sin(time*3.2)*.014;
-  const untitled=installed==='untitled',lightGain=untitled?.5:1;
+  const untitled=installed==='untitled',fire=installed==='fire',lightGain=untitled?.5:fire?.65:1;
   screenLight.intensity=screenPower*(.12+nightBlend*145)*flicker*lightGain;
   bezelLight.intensity=screenPower*(.035+nightBlend*4.8)*flicker*lightGain;
   screenMaterial.uniforms.uPower.value=screenPower;screenMaterial.uniforms.uNight.value=nightBlend;
   // The pale Untitled artwork needs less emission and bloom than the two dark artworks.
   screenMaterial.uniforms.uBrightness.value=untitled?.651:1+nightBlend*1.5;
   reflector.visible=nightBlend>.01&&screenPower>.01;reflector.material.uniforms.uStrength.value=.22*nightBlend*screenPower;
-  bloom.strength=(untitled?.38:.95)*nightBlend*screenPower;bloom.enabled=nightBlend>.01&&screenPower>.01;
+  bloom.threshold=fire?.008:.5;
+  bloom.strength=(untitled?.38:fire?1.25:.95)*nightBlend*screenPower;
   if(Math.abs(oldNight-nightBlend)>.002||Math.abs(oldPower-screenPower)>.002)renderer.shadowMap.needsUpdate=true;
   canvas.dataset.power=screenPower>.01?'on':'off';
 }
@@ -640,7 +662,10 @@ function init() {
   floor=new THREE.Mesh(new THREE.PlaneGeometry(150,150),new THREE.MeshStandardMaterial({color:'#f5f5ef',roughness:.93}));floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
   tv=createCRT();consoleModel=createConsole();controller=createController();rack=createRack();[tv,consoleModel,controller,rack].forEach(o=>{scene.add(o);modelObjects.push(o);});
   keys.forEach((key,index)=>{const card=createCartridge(key,index);scene.add(card);cards.push(card);});
-  slotRing=new THREE.Mesh(new THREE.TorusGeometry(1.11,.021,10,72),new THREE.MeshBasicMaterial({color:'#bdd58b',transparent:true,opacity:.9,depthTest:false}));slotRing.rotation.x=-Math.PI/2;slotRing.scale.y=.21;slotRing.visible=false;slotRing.renderOrder=99;scene.add(slotRing);
+  // Bake the ellipse before attaching it to the console, so its long axis follows the slot.
+  const slotOutline=new THREE.TorusGeometry(1.3,.018,10,96);
+  slotOutline.scale(1,.25,1);slotOutline.rotateX(-Math.PI/2);
+  slotRing=new THREE.Mesh(slotOutline,new THREE.MeshBasicMaterial({color:'#bdd58b',transparent:true,opacity:.9,depthTest:false}));slotRing.visible=false;slotRing.renderOrder=99;consoleModel.add(slotRing);
   slotCollider=new THREE.Mesh(new THREE.BoxGeometry(2.6,.1,.58),new THREE.MeshBasicMaterial({visible:false}));scene.add(slotCollider);
   createNightLighting();layout();tableShadows.push({mesh:contactShadow(tv.position.x,tv.position.z,5.6,3.6,.44),object:tv},{mesh:contactShadow(consoleModel.position.x,consoleModel.position.z,4.5,3.5,.3),object:consoleModel});
   updateUI();drawScreen(0,true);
@@ -669,7 +694,7 @@ function render(now) {
   });
   updateLighting(dt,elapsed);
   screenMaterial.uniforms.uTime.value=reduceMotion.matches?0:elapsed;screenMaterial.uniforms.uSwitch.value=reduceMotion.matches?0:screenPower*Math.max(0,1-(elapsed-transitionStarted)/.4);
-  drawScreen(elapsed);if(nightBlend>.001)composer.render(dt);else renderer.render(scene,camera);
+  drawScreen(elapsed);if(nightBlend>.001)renderNight(dt);else renderer.render(scene,camera);
   if(readyFrames<3&&++readyFrames===3){loading.classList.add('is-ready');canvas.dataset.ready='true';}
 }
 

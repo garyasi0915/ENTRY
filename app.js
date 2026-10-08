@@ -171,9 +171,23 @@ function createCRT() {
     fragmentShader: `uniform sampler2D uMap;uniform float uTime;uniform float uSwitch;uniform float uPower;uniform float uNight;uniform float uBrightness;varying vec2 vUv;
       float noise(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
       void main(){vec2 q=abs(vUv-.5)-vec2(.458,.455);float edge=length(max(q,0.))+min(max(q.x,q.y),0.)-.039;if(edge>0.)discard;
-      vec2 uv=vUv;uv.x+=uSwitch*.012*sin(uv.y*87.+uTime*43.);vec3 col=texture2D(uMap,uv).rgb;
-      col*=.96+.04*sin(vUv.y*720.);float vignette=1.-.38*pow(length((vUv-.5)*1.36),2.);col*=vignette;
-      float snow=noise(floor(vUv*vec2(550.,400.))+floor(uTime*32.));col=mix(col,vec3(snow),uSwitch*.85);
+      // Slow tape tracking, fine scanlines and restrained chroma bleed.
+      float frame=floor(uTime*24.);
+      float tracking=exp(-pow((fract(vUv.y+uTime*.075)-.5)/.035,2.));
+      vec2 uv=vUv;
+      uv.x+=.0008*sin(vUv.y*35.+uTime*2.7)+tracking*.0025*sin(uTime*5.);
+      uv.x+=uSwitch*.012*sin(uv.y*87.+uTime*43.);
+      uv=clamp(uv,vec2(.002),vec2(.998));
+      vec3 col=texture2D(uMap,uv).rgb;
+      col.r=mix(col.r,texture2D(uMap,uv+vec2(.0012,0.)).r,.38);
+      col.b=mix(col.b,texture2D(uMap,uv-vec2(.0012,0.)).b,.38);
+      float scanFade=1.-smoothstep(.3,.55,fwidth(vUv.y)*120.);
+      float scan=.90+.10*sin(vUv.y*120.*6.283185+uTime*.8);
+      col*=mix(1.,scan,scanFade)*(1.-tracking*.12);
+      float vignette=1.-.38*pow(length((vUv-.5)*1.36),2.);col*=vignette;
+      float snow=noise(floor(vUv*vec2(550.,400.))+frame);
+      col+=vec3((snow-.5)*.006);
+      col=mix(max(col,vec3(0.)),vec3(snow),uSwitch*.85);
       vec3 glass=vec3(.012,.018,.019);glass*=1.-uNight*.85;col=mix(glass,col*uBrightness,uPower);gl_FragColor=vec4(col,1.);#include <tonemapping_fragment>\n#include <colorspace_fragment>}`.replace(';#include',';\n#include'), toneMapped: false });
   const display = new THREE.Mesh(geometry, screenMaterial); display.position.set(-.04, 2.61, 1.665); display.userData.action='explore';actionMeshes.push(display);g.add(display);
   const holeGeo = new THREE.CylinderGeometry(.014, .014, .018, 6);
@@ -605,15 +619,15 @@ function createNightLighting() {
   composer.addPass(combinePass);composer.addPass(new OutputPass());
 }
 // Bloom only the CRT. Opaque black geometry still occludes its light correctly.
-function renderNight(dt) {
-  const background=scene.background,reflectionVisible=reflector.visible,shadows=renderer.shadowMap.enabled;
-  scene.background=bloomBackground;reflector.visible=false;renderer.shadowMap.enabled=false;
+function renderScreenGlow(dt) {
+  const background=scene.background,fog=scene.fog,reflectionVisible=reflector.visible,shadows=renderer.shadowMap.enabled;
+  scene.background=bloomBackground;scene.fog=null;reflector.visible=false;renderer.shadowMap.enabled=false;
   scene.traverse(object=>{
     if(object.isMesh&&object.material.visible!==false&&object.material!==screenMaterial){bloomMaterials.set(object,object.material);object.material=bloomMask;}
   });
   try {bloomComposer.render(dt);} finally {
     bloomMaterials.forEach((material,object)=>{object.material=material;});bloomMaterials.clear();
-    scene.background=background;reflector.visible=reflectionVisible;renderer.shadowMap.enabled=shadows;
+    scene.background=background;scene.fog=fog;reflector.visible=reflectionVisible;renderer.shadowMap.enabled=shadows;
   }
   composer.render(dt);
 }
@@ -634,14 +648,15 @@ function updateLighting(dt,time) {
   screenLight.color.lerp(screenTint,reduceMotion.matches?1:1-Math.exp(-dt*7));bezelLight.color.copy(screenLight.color);
   const flicker=reduceMotion.matches?1:1+Math.sin(time*3.2)*.014;
   const untitled=installed==='untitled',fire=installed==='fire',lightGain=untitled?.5:fire?.65:1;
-  screenLight.intensity=screenPower*(.12+nightBlend*145)*flicker*lightGain;
-  bezelLight.intensity=screenPower*(.035+nightBlend*4.8)*flicker*lightGain;
+  screenLight.intensity=screenPower*THREE.MathUtils.lerp(12,145.12,nightBlend)*flicker*lightGain;
+  bezelLight.intensity=screenPower*THREE.MathUtils.lerp(.55,4.835,nightBlend)*flicker*lightGain;
   screenMaterial.uniforms.uPower.value=screenPower;screenMaterial.uniforms.uNight.value=nightBlend;
   // The pale Untitled artwork needs less emission and bloom than the two dark artworks.
-  screenMaterial.uniforms.uBrightness.value=untitled?.651:1+nightBlend*1.5;
+  screenMaterial.uniforms.uBrightness.value=untitled?.651:THREE.MathUtils.lerp(fire?1.65:1.15,2.5,nightBlend);
   reflector.visible=nightBlend>.01&&screenPower>.01;reflector.material.uniforms.uStrength.value=.22*nightBlend*screenPower;
-  bloom.threshold=fire?.008:.5;
-  bloom.strength=(untitled?.38:fire?1.25:.95)*nightBlend*screenPower;
+  bloom.threshold=fire?THREE.MathUtils.lerp(.001,.008,nightBlend):THREE.MathUtils.lerp(.3,.5,nightBlend);
+  const dayBloom=untitled?.22:fire?.9:.55,nightBloom=untitled?.38:fire?1.25:.95;
+  bloom.strength=THREE.MathUtils.lerp(dayBloom,nightBloom,nightBlend)*screenPower;
   if(Math.abs(oldNight-nightBlend)>.002||Math.abs(oldPower-screenPower)>.002)renderer.shadowMap.needsUpdate=true;
   canvas.dataset.power=screenPower>.01?'on':'off';
 }
@@ -694,7 +709,7 @@ function render(now) {
   });
   updateLighting(dt,elapsed);
   screenMaterial.uniforms.uTime.value=reduceMotion.matches?0:elapsed;screenMaterial.uniforms.uSwitch.value=reduceMotion.matches?0:screenPower*Math.max(0,1-(elapsed-transitionStarted)/.4);
-  drawScreen(elapsed);if(nightBlend>.001)renderNight(dt);else renderer.render(scene,camera);
+  drawScreen(elapsed);renderScreenGlow(dt);
   if(readyFrames<3&&++readyFrames===3){loading.classList.add('is-ready');canvas.dataset.ready='true';}
 }
 
